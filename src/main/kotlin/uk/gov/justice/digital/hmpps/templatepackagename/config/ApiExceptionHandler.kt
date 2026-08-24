@@ -8,13 +8,38 @@ import org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR
 import org.springframework.http.HttpStatus.NOT_FOUND
 import org.springframework.http.ResponseEntity
 import org.springframework.security.access.AccessDeniedException
+import org.springframework.validation.FieldError
+import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.servlet.resource.NoResourceFoundException
 import uk.gov.justice.hmpps.kotlin.common.ErrorResponse
 
 @RestControllerAdvice
-class HmppsTemplateKotlinExceptionHandler {
+class ApiExceptionHandler {
+  @ExceptionHandler(MethodArgumentNotValidException::class)
+  fun handleMethodArgumentNotValidException(e: MethodArgumentNotValidException): ResponseEntity<ErrorResponse> {
+    val validationMessage = e.bindingResult.allErrors
+      .mapNotNull {
+        when (it) {
+          is FieldError -> it.defaultMessage?.let { message -> "${it.field}: $message" }
+          else -> it.defaultMessage
+        }
+      }
+      .ifEmpty { listOf("Request validation failed") }
+      .joinToString("; ")
+
+    return ResponseEntity
+      .status(BAD_REQUEST)
+      .body(
+        ErrorResponse(
+          status = BAD_REQUEST,
+          userMessage = "Validation failure: $validationMessage",
+          developerMessage = validationMessage,
+        ),
+      ).also { log.info("Request validation exception: {}", validationMessage) }
+  }
+
   @ExceptionHandler(ValidationException::class)
   fun handleValidationException(e: ValidationException): ResponseEntity<ErrorResponse> = ResponseEntity
     .status(BAD_REQUEST)

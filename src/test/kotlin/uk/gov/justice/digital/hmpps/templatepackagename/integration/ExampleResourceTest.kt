@@ -4,56 +4,117 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import org.springframework.http.MediaType
+import java.math.BigDecimal
 import java.time.LocalDate
 
-// TODO This test exists to support the HMPPS Typescript template and should be removed by the bootstrap process
 class ExampleResourceTest : IntegrationTestBase() {
 
   @Nested
-  @DisplayName("GET /example/time")
-  inner class TimeEndpoint {
+  @DisplayName("POST /v1/benefit-checks/assessments")
+  inner class BenefitAssessmentEndpoint {
 
     @Test
-    fun `should return unauthorized if no token`() {
-      webTestClient.get()
-        .uri("/example/time")
+    fun `should return unauthorized if no credentials`() {
+      webTestClient.post()
+        .uri("/v1/benefit-checks/assessments")
+        .contentType(MediaType.APPLICATION_JSON)
+        .bodyValue(validRequest())
         .exchange()
         .expectStatus()
         .isUnauthorized
     }
 
     @Test
-    fun `should return forbidden if no role`() {
-      webTestClient.get()
-        .uri("/example/time")
+    fun `should return unauthorized if credentials are wrong`() {
+      webTestClient.post()
+        .uri("/v1/benefit-checks/assessments")
+        .headers(setAuthorisation(password = "wrong-secret"))
+        .contentType(MediaType.APPLICATION_JSON)
+        .bodyValue(validRequest())
+        .exchange()
+        .expectStatus()
+        .isUnauthorized
+    }
+
+    @Test
+    fun `should validate request payload`() {
+      webTestClient.post()
+        .uri("/v1/benefit-checks/assessments")
         .headers(setAuthorisation())
+        .contentType(MediaType.APPLICATION_JSON)
+        .bodyValue(validRequest().replace("AA123456A", "BAD-NINO"))
         .exchange()
         .expectStatus()
-        .isForbidden
+        .isBadRequest
     }
 
     @Test
-    fun `should return forbidden if wrong role`() {
-      webTestClient.get()
-        .uri("/example/time")
-        .headers(setAuthorisation(roles = listOf("ROLE_WRONG")))
+    fun `should return an assessment response`() {
+      webTestClient.post()
+        .uri("/v1/benefit-checks/assessments")
+        .headers(setAuthorisation())
+        .contentType(MediaType.APPLICATION_JSON)
+        .bodyValue(validRequest())
         .exchange()
         .expectStatus()
-        .isForbidden
-    }
-
-    @Test
-    fun `should return OK`() {
-      webTestClient.get()
-        .uri("/example/time")
-        .headers(setAuthorisation(roles = listOf("ROLE_TEMPLATE_KOTLIN__UI")))
-        .exchange()
-        .expectStatus()
-        .isOk
+        .isCreated
         .expectBody()
-        .jsonPath("$").value<String> {
-          assertThat(it).startsWith("${LocalDate.now()}")
+        .jsonPath("decision").isEqualTo("ELIGIBLE")
+        .jsonPath("matchedEntitlements.length()").isEqualTo(3)
+        .jsonPath("riskFlags.length()").isEqualTo(0)
+        .jsonPath("assessmentId").value<String> {
+          assertThat(it).isNotBlank()
         }
+    }
+
+    @Test
+    fun `should flag claims for manual review when savings are high`() {
+      val request = """
+        {
+          "firstName": "Jordan",
+          "lastName": "Taylor",
+          "nino": "AA123456A",
+          "dateOfBirth": "${LocalDate.now().minusYears(40)}",
+          "claimedBenefits": ["UNIVERSAL_CREDIT"],
+          "annualIncome": ${BigDecimal("18000")},
+          "savingsAmount": ${BigDecimal("20000")},
+          "housingCostsPerMonth": ${BigDecimal("900")},
+          "dependantChildren": 0,
+          "disabledApplicant": false,
+          "caringResponsibilities": false,
+          "postcode": "SW1A 1AA"
+        }
+      """.trimIndent()
+
+      webTestClient.post()
+        .uri("/v1/benefit-checks/assessments")
+        .headers(setAuthorisation())
+        .contentType(MediaType.APPLICATION_JSON)
+        .bodyValue(request)
+        .exchange()
+        .expectStatus()
+        .isCreated
+        .expectBody()
+        .jsonPath("decision").isEqualTo("REFER_FOR_REVIEW")
+        .jsonPath("riskFlags[0]").isEqualTo("HIGH_SAVINGS")
     }
   }
 }
+
+private fun validRequest(): String = """
+  {
+    "firstName": "Alex",
+    "lastName": "Morgan",
+    "nino": "AA123456A",
+    "dateOfBirth": "${LocalDate.now().minusYears(35)}",
+    "claimedBenefits": ["UNIVERSAL_CREDIT", "CHILD_BENEFIT"],
+    "annualIncome": 21000,
+    "savingsAmount": 1000,
+    "housingCostsPerMonth": 950,
+    "dependantChildren": 2,
+    "disabledApplicant": true,
+    "caringResponsibilities": false,
+    "postcode": "SW1A 1AA"
+  }
+""".trimIndent()

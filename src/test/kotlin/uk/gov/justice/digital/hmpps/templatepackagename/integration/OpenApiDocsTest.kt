@@ -3,7 +3,6 @@ package uk.gov.justice.digital.hmpps.templatepackagename.integration
 import io.swagger.v3.parser.OpenAPIV3Parser
 import net.minidev.json.JSONArray
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
@@ -36,7 +35,6 @@ class OpenApiDocsTest : IntegrationTestBase() {
   }
 
   @Test
-  @Disabled("TODO Enable this test once you have an endpoint. It checks that endpoints appear on the OpenAPI spec.")
   fun `the open api json contains documentation`() {
     webTestClient.get()
       .uri("/v3/api-docs")
@@ -44,7 +42,7 @@ class OpenApiDocsTest : IntegrationTestBase() {
       .exchange()
       .expectStatus().isOk
       .expectBody()
-      .jsonPath("paths").isNotEmpty
+      .jsonPath("$.paths['/v1/benefit-checks/assessments']").exists()
   }
 
   @Test
@@ -66,7 +64,6 @@ class OpenApiDocsTest : IntegrationTestBase() {
   }
 
   @Test
-  @Disabled("TODO Enable this test once you have added security schema to OpenApiConfiguration.OpenAPi().components()")
   fun `the open api json path security requirements are valid`() {
     val result = OpenAPIV3Parser().readLocation("http://localhost:$port/v3/api-docs", null, null)
 
@@ -74,14 +71,15 @@ class OpenApiDocsTest : IntegrationTestBase() {
     // We therefore need to grab all the valid security requirements and check that each path only contains those items
     val securityRequirements = result.openAPI.security.flatMap { it.keys }
     result.openAPI.paths.forEach { pathItem ->
-      assertThat(pathItem.value.get.security.flatMap { it.keys }).isSubsetOf(securityRequirements)
+      pathItem.value.readOperations().forEach { operation ->
+        assertThat(operation.security.flatMap { it.keys }).isSubsetOf(securityRequirements)
+      }
     }
   }
 
   @ParameterizedTest
-  @Disabled("TODO Enable this test once you have added security schema to OpenApiConfiguration.OpenAPi().components(). Add the security scheme / roles to @CsvSource")
-  @CsvSource(value = ["security-scheme-name, ROLE_"])
-  fun `the security scheme is setup for bearer tokens`(key: String, role: String) {
+  @CsvSource(value = ["basicAuth, ORCHESTRATION_CLIENT"])
+  fun `the security scheme is setup for basic auth`(key: String, role: String) {
     webTestClient.get()
       .uri("/v3/api-docs")
       .accept(MediaType.APPLICATION_JSON)
@@ -89,16 +87,14 @@ class OpenApiDocsTest : IntegrationTestBase() {
       .expectStatus().isOk
       .expectBody()
       .jsonPath("$.components.securitySchemes.$key.type").isEqualTo("http")
-      .jsonPath("$.components.securitySchemes.$key.scheme").isEqualTo("bearer")
+      .jsonPath("$.components.securitySchemes.$key.scheme").isEqualTo("basic")
       .jsonPath("$.components.securitySchemes.$key.description").value<String> {
         assertThat(it).contains(role)
       }
-      .jsonPath("$.components.securitySchemes.$key.bearerFormat").isEqualTo("JWT")
-      .jsonPath("$.security[0].$key").isEqualTo(JSONArray().apply { this.add("read") })
+      .jsonPath("$.security[0].$key").isEqualTo(JSONArray())
   }
 
   @Test
-  @Disabled("TODO Enable this test once you have an endpoint.")
   fun `all endpoints have a security scheme defined`() {
     webTestClient.get()
       .uri("/v3/api-docs")
