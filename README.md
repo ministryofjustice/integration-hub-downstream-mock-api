@@ -72,4 +72,4 @@ The development deployment targets the dedicated Modernisation Platform ECS serv
 
 Pull requests run the test suite. A push to `main` builds an immutable commit-SHA image, pushes it to ECR, registers a new task-definition revision and waits for the ECS service to become stable.
 
-The temporary `aws-ecs-deployment` branch trigger publishes the initial `bootstrap-2026-08-24` image required to start the service before this workflow reaches `main`.
+The temporary `aws-ecs-deployment` branch trigger also publishes an immutable commit-SHA image so the initial Terraform-managed service can be bootstrapped before this workflow reaches `main`.

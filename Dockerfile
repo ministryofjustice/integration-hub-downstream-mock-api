@@ -21,5 +21,6 @@ COPY --from=builder --chown=appuser:appgroup /builder/extracted/dependencies/ ./
 COPY --from=builder --chown=appuser:appgroup /builder/extracted/spring-boot-loader/ ./
 COPY --from=builder --chown=appuser:appgroup /builder/extracted/snapshot-dependencies/ ./
 COPY --from=builder --chown=appuser:appgroup /builder/extracted/application/ ./
+COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/downstream-mock-api-entrypoint
 
-ENTRYPOINT ["java", "-XX:+ExitOnOutOfMemoryError", "-XX:+AlwaysActAsServerClassMachine", "-javaagent:agent.jar", "-jar", "app.jar"]
+ENTRYPOINT ["/usr/local/bin/downstream-mock-api-entrypoint"]

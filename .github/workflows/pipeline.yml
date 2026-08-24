@@ -63,13 +63,8 @@ jobs:
         id: image
         shell: bash
         run: |
-          if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
-            image_tag="${GITHUB_SHA}"
-          else
-            image_tag="bootstrap-2026-08-24"
-          fi
           build_version="$(date -u +%Y-%m-%d).${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-          echo "tag=${image_tag}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
           echo "version=${build_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Build application
