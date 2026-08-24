@@ -1,0 +1,12 @@
+.git
+.github
+.gradle
+.idea
+helm_deploy
+src
+
+build/*
+!build/libs/
+build/libs/*
+!build/libs/integration-hub-downstream-mock-api-*.jar
+!build/libs/applicationinsights-agent*.jar

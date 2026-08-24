@@ -1,105 +1,138 @@
-name: Pipeline [test -> build -> deploy]
+name: Test, build and deploy to development
 
 on:
+  pull_request:
   push:
     branches:
-      - '**'
+      - main
+      - aws-ecs-deployment
   workflow_dispatch:
-    inputs:
-      additional_docker_tag:
-        description: Additional docker tag that can be used to specify stable or testing tags
-        required: false
-        default: ''
-        type: string
-      push:
-        description: Push docker image to registry flag
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
-  # Only cancel in progress when on a branch - use SHA on main to ensure uniqueness.
-  # This will allow multiple pipelines to run at the same time on main.
-  # Note that two pipelines running within a few minutes of each other will cause issues with helm deploying to
-  # a namespace, as the second one will not be able to get a lock as a deploy will be in progress.
-  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  group: downstream-mock-api-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+env:
+  AWS_REGION: eu-west-2
+  ECR_REPOSITORY: integration-hub-downstream-mock-api
+  ECS_CLUSTER: integration-hub-downstream-mock-api
+  ECS_SERVICE: integration-hub-downstream-mock-api
+
 jobs:
-  helm_lint:
-    strategy:
-      matrix:
-        environments: ['dev', 'preprod', 'prod']
-    name: helm lint
-    uses: ministryofjustice/hmpps-github-actions/.github/workflows/test_helm_lint.yml@v2 # WORKFLOW_VERSION
-    secrets: inherit
-    with:
-      environment: ${{ matrix.environments }}
-  app_version:
+  test:
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.app_version.outputs.version }}
     steps:
-      - id: app_version
-        name: Application version creators
-        uses: ministryofjustice/hmpps-github-actions/.github/actions/build-test-and-deploy/create_app_version@v2 # WORKFLOW_VERSION
-  gradle_verify:
-    name: Validate the kotlin
-    uses: ministryofjustice/hmpps-github-actions/.github/workflows/gradle_verify.yml@v2 # WORKFLOW_VERSION
-    secrets: inherit
-    with:
-      gradle-command: 'BUILD_NUMBER=${{ needs.app_version.outputs.version}} ./gradlew assemble check'
-      upload-build-artifacts: ${{ github.ref == 'refs/heads/main' }}
-      java-version: "25"
-    needs:
-      - app_version
-  build:
-    name: Build docker image from hmpps-github-actions
-    if: github.ref == 'refs/heads/main'
-    uses: ministryofjustice/hmpps-github-actions/.github/workflows/docker_build.yml@v2 # WORKFLOW_VERSION
-    needs:
-      - gradle_verify
-    with:
-      docker_registry: 'ghcr.io'
-      registry_org: 'ministryofjustice'
-      additional_docker_tag: ${{ inputs.additional_docker_tag }}
-      push: ${{ inputs.push || inputs.push == null }}
-      docker_multiplatform: false
-      download_build_artifacts: true
-  deploy_dev:
-    name: Deploy to the development environment
-    needs:
-      - build
-      - helm_lint
-    uses: ministryofjustice/hmpps-github-actions/.github/workflows/deploy_env.yml@v2 # WORKFLOW_VERSION
-    secrets: inherit
-    with:
-      environment: 'dev'
-      app_version: '${{ needs.build.outputs.app_version }}'
-      slack_notification: 'false' # if 'true', it needs a valid NONPROD_RELEASES_SLACK_CHANNEL variable to be set
-  # deploy_preprod:
-  #   name: Deploy to pre-production environment
-  #   needs:
-  #     - build
-  #     - deploy_dev
-  #   uses: ministryofjustice/hmpps-github-actions/.github/workflows/deploy_env.yml@v2 # WORKFLOW_VERSION
-  #   secrets: inherit
-  #   with:
-  #     environment: 'preprod'
-  #     app_version: '${{ needs.build.outputs.app_version }}'
-  #     slack_notification: 'false' # if 'true', it needs a valid NONPROD_RELEASES_SLACK_CHANNEL variable to be set
-  # deploy_prod:
-  #   name: Deploy to production environment
-  #   needs:
-  #     - build
-  #     - deploy_preprod
-  #   uses: ministryofjustice/hmpps-github-actions/.github/workflows/deploy_env.yml@v2 # WORKFLOW_VERSION
-  #   secrets: inherit
-  #   with:
-  #     environment: 'prod'
-  #     app_version: '${{ needs.build.outputs.app_version }}'
-  #     slack_notification: 'false' # if 'true', it needs a valid PROD_RELEASES_SLACK_CHANNEL variable to be set
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: gradle
+
+      - name: Run tests
+        run: ./gradlew test
+
+  build-and-deploy:
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: integration-hub-downstream-mock-api-development
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: gradle
+
+      - name: Select immutable image tag
+        id: image
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+            image_tag="${GITHUB_SHA}"
+          else
+            image_tag="bootstrap-2026-08-24"
+          fi
+          echo "tag=${image_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build application
+        env:
+          BUILD_NUMBER: ${{ steps.image.outputs.tag }}
+        run: ./gradlew clean test assemble
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d # v6
+        with:
+          role-to-assume: arn:aws:iam::508564776517:role/integration-hub-downstream-mock-api-development-app-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sign in to ECR
+        shell: bash
+        run: |
+          aws ecr get-login-password --region "${AWS_REGION}" \
+            | docker login --username AWS --password-stdin "508564776517.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+      - name: Build and push image
+        env:
+          BUILD_NUMBER: ${{ steps.image.outputs.tag }}
+        shell: bash
+        run: |
+          image_uri="508564776517.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${BUILD_NUMBER}"
+          docker build \
+            --platform linux/amd64 \
+            --build-arg "BUILD_NUMBER=${BUILD_NUMBER}" \
+            --tag "${image_uri}" \
+            .
+          docker push "${image_uri}"
+          echo "IMAGE_URI=${image_uri}" >> "${GITHUB_ENV}"
+
+      - name: Register immutable task definition
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "${ECS_SERVICE}" \
+            --query taskDefinition > task-definition.json
+
+          jq --arg image "${IMAGE_URI}" '
+            del(
+              .compatibilities,
+              .registeredAt,
+              .registeredBy,
+              .requiresAttributes,
+              .revision,
+              .status,
+              .taskDefinitionArn
+            )
+            | .containerDefinitions[0].image = $image
+          ' task-definition.json > deploy-task-definition.json
+
+          task_definition_arn=$(aws ecs register-task-definition \
+            --cli-input-json file://deploy-task-definition.json \
+            --query taskDefinition.taskDefinitionArn \
+            --output text)
+
+          aws ecs update-service \
+            --cluster "${ECS_CLUSTER}" \
+            --service "${ECS_SERVICE}" \
+            --task-definition "${task_definition_arn}" \
+            --force-new-deployment > /dev/null
+
+          aws ecs wait services-stable \
+            --cluster "${ECS_CLUSTER}" \
+            --services "${ECS_SERVICE}"
