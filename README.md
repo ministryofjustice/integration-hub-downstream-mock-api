@@ -63,10 +63,13 @@ GRADLE_USER_HOME=/tmp/integration-hub-downstream-mock-api-gradle ./gradlew test
 
 ## Deployment direction
 
-This repository is the downstream service only.
+The development deployment targets the dedicated Modernisation Platform ECS service:
 
-Recommended target shape:
+- ECR repository: `integration-hub-downstream-mock-api`
+- ECS cluster and service: `integration-hub-downstream-mock-api`
+- GitHub environment: `integration-hub-downstream-mock-api-development`
+- AWS authentication: GitHub OIDC using the scoped application deployment role
 
-- Deploy this mock as its own independent API behind API Gateway
-- Let the orchestration layer call it with credentials from Secrets Manager
-- Keep the orchestration API as a separate public-facing Integration Hub wrapper
+Pull requests run the test suite. A push to `main` builds an immutable commit-SHA image, pushes it to ECR, registers a new task-definition revision and waits for the ECS service to become stable.
+
+The temporary `aws-ecs-deployment` branch trigger also publishes an immutable commit-SHA image so the initial Terraform-managed service can be bootstrapped before this workflow reaches `main`.
