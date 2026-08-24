@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Set up Java
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
@@ -50,7 +50,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Set up Java
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
@@ -68,11 +68,13 @@ jobs:
           else
             image_tag="bootstrap-2026-08-24"
           fi
+          build_version="$(date -u +%Y-%m-%d).${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
           echo "tag=${image_tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${build_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Build application
         env:
-          BUILD_NUMBER: ${{ steps.image.outputs.tag }}
+          BUILD_NUMBER: ${{ steps.image.outputs.version }}
         run: ./gradlew clean test assemble
 
       - name: Configure AWS credentials
@@ -89,10 +91,11 @@ jobs:
 
       - name: Build and push image
         env:
-          BUILD_NUMBER: ${{ steps.image.outputs.tag }}
+          BUILD_NUMBER: ${{ steps.image.outputs.version }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
         shell: bash
         run: |
-          image_uri="508564776517.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${BUILD_NUMBER}"
+          image_uri="508564776517.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${IMAGE_TAG}"
           docker build \
             --platform linux/amd64 \
             --build-arg "BUILD_NUMBER=${BUILD_NUMBER}" \
