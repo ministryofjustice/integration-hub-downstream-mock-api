@@ -2,6 +2,11 @@
 
 Standalone mock API that simulates a DWP-style benefit checker dependency for the Integration Hub end-to-end flow.
 
+See the API Platform's
+[pilot mock API end-to-end flow](https://github.com/ministryofjustice/integration-hub-api-platform/blob/main/docs/pilot-mock-api-flow.md)
+for the complete journey from the upstream client through Integration Hub to
+this downstream provider.
+
 ## What this service does
 
 - Exposes an independently authenticated downstream endpoint at `POST /v1/benefit-checks/assessments`
